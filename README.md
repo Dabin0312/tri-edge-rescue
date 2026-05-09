@@ -252,3 +252,101 @@ ros2 topic pub /robot_b/cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.1}, angu
 Stop Robot B:
 
 ros2 topic pub /robot_b/cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0}, angular: {z: 0.0}}" --once
+
+
+15. SQLite DB
+
+Commander C saves mission events to SQLite.
+
+DB path:
+
+~/tri-edge-rescue/db/mission_events.db
+
+Check DB:
+
+sqlite3 ~/tri-edge-rescue/db/mission_events.db
+SELECT id, received_at, robot_id, object, risk_score, decision, command, target_robot
+FROM event_summary
+ORDER BY id DESC
+LIMIT 10;
+
+Exit:
+
+.quit
+16. Mission Report
+
+Generate mission report:
+
+cd ~/tri-edge-rescue
+python3 dashboard/generate_report.py
+
+Output:
+
+reports/mission_report.md
+
+17. Jetson Deployment Plan
+
+최종적으로 Jetson Orin Nano 3대는 다음과 같이 배치한다.
+| Device                | Role            | Run                           |
+| --------------------- | --------------- | ----------------------------- |
+| Gazebo PC / Ubuntu VM | Simulation PC   | Gazebo world, Robot A/B spawn |
+| Jetson A              | Robot A Brain   | `robot_a_brain`               |
+| Jetson B              | Robot B Brain   | `robot_b_brain`               |
+| Jetson C              | Local Commander | `commander_c`, DB, dashboard  |
+
+Jetson A:
+
+cd ~/tri-edge-rescue/ros2_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 run robot_a_brain event_publisher
+
+Jetson B:
+
+cd ~/tri-edge-rescue/ros2_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 run robot_b_brain event_publisher
+
+Jetson C:
+
+cd ~/tri-edge-rescue/ros2_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 run commander_c event_subscriber
+
+Dashboard on Jetson C:
+
+cd ~/tri-edge-rescue
+python3 -m streamlit run dashboard/app.py --server.address 0.0.0.0
+
+
+18. Network Setup for Jetson
+
+모든 장비는 같은 네트워크에 있어야 한다.
+
+Gazebo PC / Ubuntu VM
+Jetson A
+Jetson B
+Jetson C
+Control Desktop
+
+권장 방식:
+
+Same router / LAN
+ROS_DOMAIN_ID 동일하게 설정
+
+Set ROS domain:
+
+echo "export ROS_DOMAIN_ID=7" >> ~/.bashrc
+source ~/.bashrc
+
+Check IP:
+
+hostname -I
+
+Check communication:
+
+ping <target_ip>
+
+
