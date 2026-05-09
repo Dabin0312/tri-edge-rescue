@@ -2,48 +2,31 @@
 
 클라우드 없는 온디바이스 멀티로봇 탐색·구조 AI 프로젝트
 
-## 핵심 컨셉
+## 1. Project Overview
 
-본 프로젝트는 Robot A와 Robot B가 각자 로컬에서 상황을 판단하고, 원본 영상이 아닌 의미 정보(summary JSON)만 Commander C에 전달하는 구조를 구현한다.
+**Tri-Edge Rescue**는 재난·실험실 사고 환경을 가정한 온디바이스 멀티로봇 탐색·구조 AI 시스템이다.
 
-Commander C는 각 로봇의 summary를 통합해 판단하고, 다시 각 로봇에게 task command를 전송한다.
+본 프로젝트는 두 대의 로봇이 각자 현장에서 로컬 정보를 수집하고, 원본 영상이나 대용량 센서 데이터를 중앙으로 보내지 않고, 의미 정보(summary JSON)만 Commander C에 전달하는 구조를 구현한다.
+
+Commander C는 Robot A/B의 summary를 통합해 위험도와 상황을 판단하고, 각 로봇에게 task command를 다시 전송한다.
 
 핵심 슬로건:
 
 > 영상을 보내지 않고, 의미를 보낸다.
 
-## 현재 구현 상태
+---
 
-- Robot A summary publisher
-- Robot B summary publisher
-- Commander C summary subscriber
-- Commander C decision logic
-- SQLite DB logging
-- Commander C task command publisher
-- Robot A/B task command subscriber
+## 2. Core Concept
 
-## ROS2 Topic 구조
+기존 클라우드 기반 구조에서는 로봇의 카메라 영상이나 센서 데이터를 외부 서버로 전송해야 하므로 다음 문제가 발생할 수 있다.
 
-| Topic | Publisher | Subscriber | Description |
-|---|---|---|---|
-| `/robot_a/event_summary` | Robot A | Commander C | Robot A의 탐지/상황 summary |
-| `/robot_b/event_summary` | Robot B | Commander C | Robot B의 탐지/상황 summary |
-| `/robot_a/task_command` | Commander C | Robot A | Robot A에게 보내는 작업 명령 |
-| `/robot_b/task_command` | Commander C | Robot B | Robot B에게 보내는 작업 명령 |
+- 네트워크 불안정 시 미션 중단
+- 원본 영상 전송에 따른 민감정보 노출
+- 다중 로봇 환경에서 높은 통신량
+- 서버 왕복 지연으로 인한 느린 대응
 
-## Summary JSON 예시
+Tri-Edge Rescue는 각 로봇이 로컬에서 의미 정보를 생성하고, 중앙 Commander는 이 summary만 받아 판단한다.
 
-```json
-{
-  "robot_id": "A",
-  "timestamp": 1,
-  "object": "hazard",
-  "confidence": 0.91,
-  "position": {
-    "x": 4.2,
-    "y": 1.7
-  },
-  "risk_score": 8,
-  "event": "local_detection_summary",
-  "last_command": "avoid_area"
-}
+```text
+Raw Image / Sensor Stream ❌
+Semantic Summary JSON ✅
