@@ -3,6 +3,7 @@ import sqlite3
 
 import pandas as pd
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 
 st.set_page_config(
@@ -12,6 +13,9 @@ st.set_page_config(
 
 st.title("Tri-Edge Rescue Dashboard")
 st.caption("On-Device Multi-Robot AI Mission Monitor")
+
+# Auto refresh every 2 seconds
+st_autorefresh(interval=2000, key="dashboard_refresh")
 
 DB_PATH = os.path.expanduser("~/tri_edge_rescue/db/mission_events.db")
 
@@ -117,4 +121,4 @@ st.dataframe(
     hide_index=True
 )
 
-st.caption("Auto-refresh: 브라우저 새로고침 또는 Streamlit rerun으로 최신 DB 내용을 확인할 수 있습니다.")
+st.caption("Auto-refresh: 2초마다 DB를 다시 읽어 최신 mission event를 표시합니다.")
