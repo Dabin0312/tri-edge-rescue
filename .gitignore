@@ -1,0 +1,23 @@
+# ROS2 build files
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+
+# Logs and DB
+logs/
+*.db
+*.sqlite
+*.sqlite3
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
