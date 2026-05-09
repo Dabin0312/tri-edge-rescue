@@ -1,3 +1,6 @@
+import os
+from glob import glob
+
 from setuptools import find_packages, setup
 
 package_name = 'tri_edge_worlds'
@@ -10,18 +13,16 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        (os.path.join('share', package_name, 'worlds'), glob('worlds/*.world')),
+        (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
     maintainer='ys9072',
-    maintainer_email='kdb724@gachon.ac.kr',
-    description='TODO: Package description',
-    license='TODO: License declaration',
-    extras_require={
-        'test': [
-            'pytest',
-        ],
-    },
+    maintainer_email='ys9072@todo.todo',
+    description='Gazebo worlds for Tri-Edge Rescue',
+    license='TODO',
+    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
         ],
