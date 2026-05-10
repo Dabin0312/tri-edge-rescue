@@ -1,24 +1,27 @@
-# ROS2 build files
-ros2_ws/build/
-ros2_ws/install/
-ros2_ws/log/
+# ROS2 build artifacts
+build/
+install/
+log/
 
 # Python cache
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
 
-# Virtual environments
+# Python virtual environments
 .venv/
 venv/
+env/
 
-# Logs and DB
-logs/
+# OS/editor files
+.DS_Store
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# Runtime databases / local outputs
 *.db
 *.sqlite
 *.sqlite3
-
-# OS/editor
-.DS_Store
-.vscode/
-.idea/
-reports/
