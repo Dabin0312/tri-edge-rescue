@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+import time
 from datetime import datetime
 
 import rclpy
@@ -43,6 +44,16 @@ class CommanderCSubscriber(Node):
         self.db_path = os.path.expanduser('~/tri_edge_rescue/db/mission_events.db')
         self.init_db()
 
+        self.llm_interval_sec = 10.0
+        self.last_llm_time = {
+            "A": 0.0,
+            "B": 0.0
+        }
+        self.last_llm_reason = {
+            "A": "LLM reason is waiting for the first planning cycle.",
+            "B": "LLM reason is waiting for the first planning cycle."
+        }
+
         self.get_logger().info("[Commander C] Loading Qwen Mission Planner...")
         self.qwen_planner = QwenMissionPlanner()
         self.get_logger().info("[Commander C] Started with Qwen planner. Waiting for Robot A/B summaries...")
@@ -70,7 +81,6 @@ class CommanderCSubscriber(Node):
         )
         """)
 
-        # 기존 DB에 llm_reason 컬럼이 없을 경우 추가
         cursor.execute("PRAGMA table_info(event_summary)")
         columns = [row[1] for row in cursor.fetchall()]
 
@@ -109,6 +119,40 @@ class CommanderCSubscriber(Node):
             "continue_exploration",
             "normal_status"
         )
+
+    def get_llm_reason(self, robot_id, detected_object, risk_score, x, y, command, reason):
+        now = time.time()
+        elapsed = now - self.last_llm_time.get(robot_id, 0.0)
+
+        if elapsed < self.llm_interval_sec:
+            return self.last_llm_reason.get(
+                robot_id,
+                f"Reusing rule-based reason: {reason}"
+            )
+
+        try:
+            llm_reason = self.qwen_planner.generate_reason(
+                robot_id=robot_id,
+                detected_object=detected_object,
+                risk_score=risk_score,
+                x=x,
+                y=y,
+                command=command
+            )
+
+            if not llm_reason:
+                llm_reason = f"Rule-based reason: {reason}"
+
+            self.last_llm_time[robot_id] = now
+            self.last_llm_reason[robot_id] = llm_reason
+
+            return llm_reason
+
+        except Exception as e:
+            fallback = f"LLM unavailable. Rule-based reason: {reason}"
+            self.get_logger().error(f"[Commander C] Qwen generation failed: {e}")
+            self.last_llm_reason[robot_id] = fallback
+            return fallback
 
     def save_to_db(
         self,
@@ -199,18 +243,15 @@ class CommanderCSubscriber(Node):
 
         decision, command, reason = self.decide_command(detected_object, risk_score)
 
-        try:
-            llm_reason = self.qwen_planner.generate_reason(
-                robot_id=robot_id,
-                detected_object=detected_object,
-                risk_score=risk_score,
-                x=x,
-                y=y,
-                command=command
-            )
-        except Exception as e:
-            llm_reason = f"LLM unavailable. Rule-based reason: {reason}"
-            self.get_logger().error(f"[Commander C] Qwen generation failed: {e}")
+        llm_reason = self.get_llm_reason(
+            robot_id=robot_id,
+            detected_object=detected_object,
+            risk_score=risk_score,
+            x=x,
+            y=y,
+            command=command,
+            reason=reason
+        )
 
         self.publish_task_command(
             target_robot=robot_id,
