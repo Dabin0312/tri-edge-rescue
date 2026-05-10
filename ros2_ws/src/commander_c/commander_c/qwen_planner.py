@@ -11,8 +11,8 @@ class QwenMissionPlanner:
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
-            dtype=torch.float16,
-            device_map="cuda"
+            dtype=torch.float32,
+            device_map="cpu"
         )
 
         print("[QwenPlanner] Qwen model loaded.")
