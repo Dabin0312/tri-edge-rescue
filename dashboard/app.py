@@ -38,7 +38,8 @@ def load_data():
         risk_score,
         decision,
         command,
-        target_robot
+        target_robot,
+        llm_reason
     FROM event_summary
     ORDER BY id DESC
     LIMIT 300
@@ -55,6 +56,10 @@ if df.empty:
     st.warning("아직 DB에 저장된 이벤트가 없습니다. Commander C를 실행한 뒤 다시 확인하세요.")
     st.stop()
 
+# 컬럼이 없는 오래된 DB를 대비
+if "llm_reason" not in df.columns:
+    df["llm_reason"] = "none"
+
 latest_id = int(df["id"].max())
 total_events = len(df)
 high_risk_count = int((df["risk_score"] >= 7).sum())
@@ -69,6 +74,7 @@ latest_event = df.sort_values("id", ascending=False).iloc[0]
 latest_command = latest_event.get("command", "none")
 latest_robot = latest_event.get("robot_id", "unknown")
 latest_risk = latest_event.get("risk_score", 0)
+latest_llm_reason = latest_event.get("llm_reason", "none")
 
 if high_risk_count > 0:
     mission_status = "CAUTION: High-risk events detected"
@@ -110,6 +116,13 @@ with report_col2:
         """
     )
 
+st.subheader("LLM Mission Reason")
+
+if pd.isna(latest_llm_reason) or str(latest_llm_reason).strip() == "":
+    st.info("아직 LLM Reason이 없습니다.")
+else:
+    st.success(str(latest_llm_reason))
+
 st.divider()
 
 left, right = st.columns([2, 1])
@@ -142,7 +155,19 @@ if high_risk_df.empty:
     st.info("현재 high risk 이벤트가 없습니다.")
 else:
     st.dataframe(
-        high_risk_df,
+        high_risk_df[
+            [
+                "id",
+                "received_at",
+                "robot_id",
+                "object",
+                "x",
+                "y",
+                "risk_score",
+                "command",
+                "llm_reason"
+            ]
+        ],
         use_container_width=True,
         hide_index=True
     )
@@ -154,7 +179,16 @@ st.subheader("Latest Command by Robot")
 latest_by_robot = (
     df.sort_values("id", ascending=False)
       .drop_duplicates("robot_id")
-      [["robot_id", "command", "decision", "risk_score", "received_at"]]
+      [
+          [
+              "robot_id",
+              "command",
+              "decision",
+              "llm_reason",
+              "risk_score",
+              "received_at"
+          ]
+      ]
 )
 
 st.dataframe(
@@ -174,6 +208,7 @@ st.markdown(
     - 원본 영상 미공유
     - 의미 정보 중심 통신
     - 이벤트/위험도/좌표 기반 판단
+    - Qwen 기반 LLM Mission Reason 생성
     - 다중 로봇 협업 구조
     """
 )

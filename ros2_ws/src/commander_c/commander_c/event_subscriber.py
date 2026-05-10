@@ -7,225 +7,259 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 
+from commander_c.qwen_planner import QwenMissionPlanner
+
 
 class CommanderCSubscriber(Node):
     def __init__(self):
         super().__init__('commander_c_subscriber')
 
-        home_dir = os.path.expanduser("~")
-        db_dir = os.path.join(home_dir, "tri_edge_rescue", "db")
-        os.makedirs(db_dir, exist_ok=True)
-
-        self.db_path = os.path.join(db_dir, "mission_events.db")
-        self.conn = sqlite3.connect(self.db_path)
-        self.cursor = self.conn.cursor()
-        self.create_table()
-
-        self.robot_a_command_pub = self.create_publisher(
-            String,
-            '/robot_a/task_command',
-            10
-        )
-
-        self.robot_b_command_pub = self.create_publisher(
-            String,
-            '/robot_b/task_command',
-            10
-        )
-
-        self.create_subscription(
+        self.robot_a_subscriber = self.create_subscription(
             String,
             '/robot_a/event_summary',
             self.robot_a_callback,
             10
         )
 
-        self.create_subscription(
+        self.robot_b_subscriber = self.create_subscription(
             String,
             '/robot_b/event_summary',
             self.robot_b_callback,
             10
         )
 
-        print("[Commander C] Started. Waiting for Robot A/B summaries...", flush=True)
-        print(f"[Commander C] DB path: {self.db_path}", flush=True)
-
-    def create_table(self):
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS event_summary (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                received_at TEXT,
-                robot_id TEXT,
-                object TEXT,
-                confidence REAL,
-                x REAL,
-                y REAL,
-                risk_score INTEGER,
-                event TEXT,
-                decision TEXT,
-                command TEXT,
-                target_robot TEXT,
-                raw_json TEXT
-            )
-        """)
-
-        existing_columns = [
-            row[1] for row in self.cursor.execute("PRAGMA table_info(event_summary)")
-        ]
-
-        if "command" not in existing_columns:
-            self.cursor.execute("ALTER TABLE event_summary ADD COLUMN command TEXT")
-
-        if "target_robot" not in existing_columns:
-            self.cursor.execute("ALTER TABLE event_summary ADD COLUMN target_robot TEXT")
-
-        self.conn.commit()
-
-    def robot_a_callback(self, msg):
-        self.handle_event("A", msg.data)
-
-    def robot_b_callback(self, msg):
-        self.handle_event("B", msg.data)
-
-    def make_decision_and_command(self, robot_id, detected_object, risk_score, position):
-        if risk_score >= 7:
-            decision = "HIGH RISK: avoid or replan route"
-            command = {
-                "target_robot": robot_id,
-                "command": "avoid_area",
-                "reason": "high_risk_detected",
-                "risk_score": risk_score,
-                "target_position": position
-            }
-
-        elif detected_object == "person":
-            decision = "VICTIM CANDIDATE: prioritize rescue target"
-            command = {
-                "target_robot": robot_id,
-                "command": "approach_victim",
-                "reason": "victim_candidate_detected",
-                "risk_score": risk_score,
-                "target_position": position
-            }
-
-        elif detected_object == "obstacle":
-            decision = "OBSTACLE: update map and avoid"
-            command = {
-                "target_robot": robot_id,
-                "command": "update_map_and_avoid",
-                "reason": "obstacle_detected",
-                "risk_score": risk_score,
-                "target_position": position
-            }
-
-        else:
-            decision = "NORMAL: continue exploration"
-            command = {
-                "target_robot": robot_id,
-                "command": "continue_exploration",
-                "reason": "normal_status",
-                "risk_score": risk_score,
-                "target_position": position
-            }
-
-        return decision, command
-
-    def publish_command(self, robot_id, command):
-        msg = String()
-        msg.data = json.dumps(command, ensure_ascii=False)
-
-        if robot_id == "A":
-            self.robot_a_command_pub.publish(msg)
-        elif robot_id == "B":
-            self.robot_b_command_pub.publish(msg)
-
-        print(
-            f"[Commander C] Command sent to Robot {robot_id}: {msg.data}",
-            flush=True
+        self.robot_a_command_publisher = self.create_publisher(
+            String,
+            '/robot_a/task_command',
+            10
         )
 
-    def save_event(self, event, decision, command, raw_json):
-        position = event.get("position", {})
+        self.robot_b_command_publisher = self.create_publisher(
+            String,
+            '/robot_b/task_command',
+            10
+        )
 
-        self.cursor.execute("""
-            INSERT INTO event_summary (
-                received_at,
-                robot_id,
-                object,
-                confidence,
-                x,
-                y,
-                risk_score,
-                event,
-                decision,
-                command,
-                target_robot,
-                raw_json
+        self.db_path = os.path.expanduser('~/tri_edge_rescue/db/mission_events.db')
+        self.init_db()
+
+        self.get_logger().info("[Commander C] Loading Qwen Mission Planner...")
+        self.qwen_planner = QwenMissionPlanner()
+        self.get_logger().info("[Commander C] Started with Qwen planner. Waiting for Robot A/B summaries...")
+
+    def init_db(self):
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS event_summary (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            received_at TEXT,
+            robot_id TEXT,
+            object TEXT,
+            confidence REAL,
+            x REAL,
+            y REAL,
+            risk_score INTEGER,
+            decision TEXT,
+            command TEXT,
+            target_robot TEXT,
+            llm_reason TEXT
+        )
+        """)
+
+        # 기존 DB에 llm_reason 컬럼이 없을 경우 추가
+        cursor.execute("PRAGMA table_info(event_summary)")
+        columns = [row[1] for row in cursor.fetchall()]
+
+        if "llm_reason" not in columns:
+            cursor.execute("ALTER TABLE event_summary ADD COLUMN llm_reason TEXT")
+
+        conn.commit()
+        conn.close()
+
+        self.get_logger().info(f"[Commander C] DB ready: {self.db_path}")
+
+    def decide_command(self, detected_object, risk_score):
+        if risk_score >= 7:
+            return (
+                "HIGH RISK: avoid or replan route",
+                "avoid_area",
+                "high_risk_detected"
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            datetime.now().isoformat(timespec="seconds"),
-            event.get("robot_id"),
-            event.get("object"),
-            event.get("confidence"),
-            position.get("x"),
-            position.get("y"),
-            event.get("risk_score"),
-            event.get("event"),
+
+        if detected_object == "person":
+            return (
+                "VICTIM CANDIDATE: prioritize rescue target",
+                "approach_victim",
+                "victim_candidate_detected"
+            )
+
+        if detected_object == "obstacle":
+            return (
+                "OBSTACLE: update map and avoid",
+                "update_map_and_avoid",
+                "obstacle_detected"
+            )
+
+        return (
+            "NORMAL: continue exploration",
+            "continue_exploration",
+            "normal_status"
+        )
+
+    def save_to_db(
+        self,
+        robot_id,
+        detected_object,
+        confidence,
+        x,
+        y,
+        risk_score,
+        decision,
+        command,
+        target_robot,
+        llm_reason
+    ):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+        INSERT INTO event_summary (
+            received_at,
+            robot_id,
+            object,
+            confidence,
+            x,
+            y,
+            risk_score,
             decision,
-            command.get("command"),
-            command.get("target_robot"),
-            raw_json
+            command,
+            target_robot,
+            llm_reason
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            datetime.now().isoformat(timespec='seconds'),
+            robot_id,
+            detected_object,
+            confidence,
+            x,
+            y,
+            risk_score,
+            decision,
+            command,
+            target_robot,
+            llm_reason
         ))
 
-        self.conn.commit()
+        conn.commit()
+        conn.close()
+        return True
 
-    def handle_event(self, robot_id, data):
+    def publish_task_command(self, target_robot, command, reason, risk_score, x, y, llm_reason):
+        command_msg = {
+            "target_robot": target_robot,
+            "command": command,
+            "reason": reason,
+            "risk_score": risk_score,
+            "target_position": {
+                "x": x,
+                "y": y
+            },
+            "llm_reason": llm_reason
+        }
+
+        msg = String()
+        msg.data = json.dumps(command_msg, ensure_ascii=False)
+
+        if target_robot == "A":
+            self.robot_a_command_publisher.publish(msg)
+        elif target_robot == "B":
+            self.robot_b_command_publisher.publish(msg)
+
+        self.get_logger().info(f"[Commander C] Command sent to Robot {target_robot}: {msg.data}")
+
+    def process_summary(self, msg, expected_robot_id):
         try:
-            event = json.loads(data)
+            data = json.loads(msg.data)
+        except json.JSONDecodeError:
+            self.get_logger().error(f"[Commander C] Invalid JSON received: {msg.data}")
+            return
 
-            detected_object = event.get("object", "unknown")
-            risk_score = event.get("risk_score", 0)
-            position = event.get("position", {})
-            x = position.get("x")
-            y = position.get("y")
+        robot_id = data.get("robot_id", expected_robot_id)
+        detected_object = data.get("object", "unknown")
+        confidence = float(data.get("confidence", 0.0))
+        position = data.get("position", {})
+        x = float(position.get("x", 0.0))
+        y = float(position.get("y", 0.0))
+        risk_score = int(data.get("risk_score", 0))
 
-            decision, command = self.make_decision_and_command(
-                robot_id,
-                detected_object,
-                risk_score,
-                position
+        decision, command, reason = self.decide_command(detected_object, risk_score)
+
+        try:
+            llm_reason = self.qwen_planner.generate_reason(
+                robot_id=robot_id,
+                detected_object=detected_object,
+                risk_score=risk_score,
+                x=x,
+                y=y,
+                command=command
             )
-
-            self.save_event(event, decision, command, data)
-            self.publish_command(robot_id, command)
-
-            print(
-                f"[Commander C] Robot {robot_id} | "
-                f"object={detected_object}, "
-                f"pos=({x}, {y}), "
-                f"risk={risk_score} | "
-                f"decision={decision} | "
-                f"command={command.get('command')} | "
-                f"saved_to_db=True",
-                flush=True
-            )
-
         except Exception as e:
-            print(f"[Commander C] Error from Robot {robot_id}: {e}", flush=True)
-            print(f"Raw data: {data}", flush=True)
+            llm_reason = f"LLM unavailable. Rule-based reason: {reason}"
+            self.get_logger().error(f"[Commander C] Qwen generation failed: {e}")
 
-    def destroy_node(self):
-        self.conn.close()
-        super().destroy_node()
+        self.publish_task_command(
+            target_robot=robot_id,
+            command=command,
+            reason=reason,
+            risk_score=risk_score,
+            x=x,
+            y=y,
+            llm_reason=llm_reason
+        )
+
+        saved = self.save_to_db(
+            robot_id=robot_id,
+            detected_object=detected_object,
+            confidence=confidence,
+            x=x,
+            y=y,
+            risk_score=risk_score,
+            decision=decision,
+            command=command,
+            target_robot=robot_id,
+            llm_reason=llm_reason
+        )
+
+        self.get_logger().info(
+            f"[Commander C] Robot {robot_id} | "
+            f"object={detected_object}, pos=({x}, {y}), risk={risk_score} | "
+            f"decision={decision} | command={command} | "
+            f"llm_reason={llm_reason} | saved_to_db={saved}"
+        )
+
+    def robot_a_callback(self, msg):
+        self.process_summary(msg, "A")
+
+    def robot_b_callback(self, msg):
+        self.process_summary(msg, "B")
 
 
 def main(args=None):
     rclpy.init(args=args)
     node = CommanderCSubscriber()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == '__main__':
