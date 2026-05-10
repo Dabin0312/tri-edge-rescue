@@ -56,7 +56,6 @@ if df.empty:
     st.warning("아직 DB에 저장된 이벤트가 없습니다. Commander C를 실행한 뒤 다시 확인하세요.")
     st.stop()
 
-# 컬럼이 없는 오래된 DB를 대비
 if "llm_reason" not in df.columns:
     df["llm_reason"] = "none"
 
