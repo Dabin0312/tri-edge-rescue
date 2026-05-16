@@ -1,8 +1,8 @@
 # Tri-Edge Rescue
 
-클라우드 없이 동작하는 온디바이스 멀티로봇 탐색·구조 AI 프로젝트입니다.
+Cloud-free on-device multi-robot search and rescue AI project.
 
-Tri-Edge Rescue는 Gazebo/ROS2 시뮬레이션에서 Robot A/B가 각자 현장 정보를 요약하고, Jetson C 역할의 Commander가 summary JSON만 받아 임무를 배정하는 구조를 검증합니다. 원본 영상이나 대용량 센서 스트림을 중앙 서버로 보내지 않고, 위치·객체·위험도 중심의 가벼운 메시지만 공유하는 것이 핵심입니다.
+Tri-Edge Rescue validates a Gazebo/ROS2 rescue workflow where Robot A and Robot B summarize local field events, while Commander C receives only compact summary JSON and assigns missions. The core idea is to avoid sending raw video or heavy sensor streams to a central server. Instead, each robot shares lightweight semantic messages such as position, detected object, and risk score.
 
 ## Architecture
 
@@ -66,6 +66,22 @@ tri-edge-rescue/
   tests/
   qwen_test.py
   requirements.txt
+```
+
+## System Requirements
+
+The full demo expects an Ubuntu or Jetson environment with:
+
+- ROS2 Humble
+- Gazebo Classic with `gazebo_ros`
+- TurtleBot3 Gazebo models
+- Python 3.10 or later
+- `colcon` build tools
+
+On a ROS2 Humble machine, the usual packages are:
+
+```bash
+sudo apt install ros-humble-gazebo-ros-pkgs ros-humble-turtlebot3-gazebo python3-colcon-common-extensions
 ```
 
 ## Python Dependencies
