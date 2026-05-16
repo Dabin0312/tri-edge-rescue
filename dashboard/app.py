@@ -6,6 +6,17 @@ import streamlit as st
 from streamlit_autorefresh import st_autorefresh
 
 
+def mission_db_path():
+    configured_path = os.getenv("TRI_EDGE_DB_PATH")
+    if configured_path:
+        return os.path.expanduser(configured_path)
+
+    project_home = os.getenv("TRI_EDGE_HOME", "~/tri_edge_rescue")
+    return os.path.join(os.path.expanduser(project_home), "db", "mission_events.db")
+
+
+DB_PATH = mission_db_path()
+
 st.set_page_config(
     page_title="Tri-Edge Rescue Dashboard",
     layout="wide"
@@ -16,8 +27,6 @@ st.caption("On-Device Multi-Robot AI Mission Monitor")
 
 st_autorefresh(interval=2000, key="dashboard_refresh")
 
-DB_PATH = os.path.expanduser("~/tri_edge_rescue/db/mission_events.db")
-
 
 @st.cache_data(ttl=2)
 def load_data():
@@ -25,7 +34,6 @@ def load_data():
         return pd.DataFrame()
 
     conn = sqlite3.connect(DB_PATH)
-
     query = """
     SELECT
         id,
@@ -45,15 +53,19 @@ def load_data():
     LIMIT 300
     """
 
-    df = pd.read_sql_query(query, conn)
-    conn.close()
+    try:
+        df = pd.read_sql_query(query, conn)
+    finally:
+        conn.close()
+
     return df
 
 
 df = load_data()
 
 if df.empty:
-    st.warning("아직 DB에 저장된 이벤트가 없습니다. Commander C를 실행한 뒤 다시 확인하세요.")
+    st.warning("No mission events have been saved yet. Run Commander C and check again.")
+    st.code(DB_PATH, language="text")
     st.stop()
 
 if "llm_reason" not in df.columns:
@@ -90,7 +102,6 @@ col3.metric("High Risk Events", high_risk_count)
 col4.metric("Victim Candidates", victim_count)
 
 st.divider()
-
 st.subheader("Mission Report")
 
 report_col1, report_col2 = st.columns([1, 1])
@@ -118,7 +129,7 @@ with report_col2:
 st.subheader("LLM Mission Reason")
 
 if pd.isna(latest_llm_reason) or str(latest_llm_reason).strip() == "":
-    st.info("아직 LLM Reason이 없습니다.")
+    st.info("No LLM reason has been generated yet.")
 else:
     st.success(str(latest_llm_reason))
 
@@ -146,12 +157,12 @@ with right:
     st.bar_chart(object_counts, x="object", y="count")
 
 st.divider()
-
 st.subheader("High Risk Events")
+
 high_risk_df = df[df["risk_score"] >= 7]
 
 if high_risk_df.empty:
-    st.info("현재 high risk 이벤트가 없습니다.")
+    st.info("No high-risk events are currently stored.")
 else:
     st.dataframe(
         high_risk_df[
@@ -172,7 +183,6 @@ else:
     )
 
 st.divider()
-
 st.subheader("Latest Command by Robot")
 
 latest_by_robot = (
@@ -197,19 +207,19 @@ st.dataframe(
 )
 
 st.divider()
-
 st.subheader("Communication Value")
 
 st.markdown(
     """
-    이 시스템은 원본 영상 스트림을 공유하지 않고, 각 로봇이 생성한 summary JSON만 Commander C에 전달한다.
+    This system does not share raw image streams. Each robot sends only a compact
+    summary JSON to Commander C.
 
-    - 원본 영상 미공유
-    - 의미 정보 중심 통신
-    - 이벤트/위험도/좌표 기반 판단
-    - Qwen 기반 LLM Mission Reason 생성
-    - 다중 로봇 협업 구조
+    - No raw image sharing
+    - Semantic summary-only communication
+    - Event, risk, and position-based decision making
+    - Qwen-based mission reasoning when the local model is available
+    - Multi-robot task feedback loop
     """
 )
 
-st.caption("Auto-refresh: 2초마다 DB를 다시 읽어 최신 mission event를 표시합니다.")
+st.caption("Auto-refresh reads the mission DB every 2 seconds.")

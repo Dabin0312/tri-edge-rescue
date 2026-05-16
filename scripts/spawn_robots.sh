@@ -1,4 +1,8 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export TRI_EDGE_HOME="${TRI_EDGE_HOME:-$REPO_ROOT}"
 
 source /opt/ros/humble/setup.bash
 export TURTLEBOT3_MODEL=burger
@@ -29,7 +33,7 @@ ros2 run gazebo_ros spawn_entity.py \
 sleep 3
 
 echo "[Tri-Edge Rescue] Checking robot topics..."
-ros2 topic list | grep robot
+ros2 topic list | grep robot || true
 
 if ros2 topic list | grep -q "/robot_a/odom" && ros2 topic list | grep -q "/robot_b/odom"; then
   echo "[Tri-Edge Rescue] Robot A/B spawn verified successfully."

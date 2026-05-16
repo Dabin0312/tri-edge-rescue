@@ -1,49 +1,26 @@
-from transformers import AutoModelForCausalLM, AutoTokenizer
-import torch
+import sys
+from pathlib import Path
 
-model_name = "Qwen/Qwen2.5-0.5B-Instruct"
 
-tokenizer = AutoTokenizer.from_pretrained(model_name)
+repo_root = Path(__file__).resolve().parent
+commander_src = repo_root / "ros2_ws" / "src" / "commander_c"
+sys.path.insert(0, str(commander_src))
 
-model = AutoModelForCausalLM.from_pretrained(
-    model_name,
-    dtype=torch.float32,
-    device_map="cpu"
-)
+from commander_c.qwen_planner import QwenMissionPlanner
 
-messages = [
-    {
-        "role": "system",
-        "content": "You are a mission planner for a multi-robot rescue system."
-    },
-    {
-        "role": "user",
-        "content": (
-            "Robot A detected a hazard at (-3.5, -3.6) with risk_score 8. "
-            "Robot B is clear at (3.5, -3.5). "
-            "Return short commands for each robot."
-        )
-    }
-]
 
-text = tokenizer.apply_chat_template(
-    messages,
-    tokenize=False,
-    add_generation_prompt=True
-)
-
-inputs = tokenizer([text], return_tensors="pt")
-
-with torch.no_grad():
-    outputs = model.generate(
-        **inputs,
-        max_new_tokens=60,
-        do_sample=False
+def main():
+    planner = QwenMissionPlanner()
+    reason = planner.generate_reason(
+        robot_id="A",
+        detected_object="hazard",
+        risk_score=8,
+        x=-3.5,
+        y=-3.6,
+        command="avoid_area"
     )
+    print(reason)
 
-result = tokenizer.decode(
-    outputs[0][inputs.input_ids.shape[1]:],
-    skip_special_tokens=True
-)
 
-print(result)
+if __name__ == "__main__":
+    main()

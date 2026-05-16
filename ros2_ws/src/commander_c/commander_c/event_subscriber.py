@@ -11,6 +11,15 @@ from std_msgs.msg import String
 from commander_c.qwen_planner import QwenMissionPlanner
 
 
+def mission_db_path():
+    configured_path = os.getenv("TRI_EDGE_DB_PATH")
+    if configured_path:
+        return os.path.expanduser(configured_path)
+
+    project_home = os.getenv("TRI_EDGE_HOME", "~/tri_edge_rescue")
+    return os.path.join(os.path.expanduser(project_home), "db", "mission_events.db")
+
+
 class CommanderCSubscriber(Node):
     def __init__(self):
         super().__init__('commander_c_subscriber')
@@ -41,7 +50,7 @@ class CommanderCSubscriber(Node):
             10
         )
 
-        self.db_path = os.path.expanduser('~/tri_edge_rescue/db/mission_events.db')
+        self.db_path = mission_db_path()
         self.init_db()
 
         self.llm_interval_sec = 10.0

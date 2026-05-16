@@ -5,8 +5,20 @@ from datetime import datetime
 import pandas as pd
 
 
-DB_PATH = os.path.expanduser("~/tri_edge_rescue/db/mission_events.db")
-REPORT_DIR = os.path.expanduser("~/tri_edge_rescue/reports")
+def project_home():
+    return os.path.expanduser(os.getenv("TRI_EDGE_HOME", "~/tri_edge_rescue"))
+
+
+def mission_db_path():
+    configured_path = os.getenv("TRI_EDGE_DB_PATH")
+    if configured_path:
+        return os.path.expanduser(configured_path)
+
+    return os.path.join(project_home(), "db", "mission_events.db")
+
+
+DB_PATH = mission_db_path()
+REPORT_DIR = os.path.join(project_home(), "reports")
 
 
 def load_data():
@@ -26,7 +38,8 @@ def load_data():
         risk_score,
         decision,
         command,
-        target_robot
+        target_robot,
+        llm_reason
     FROM event_summary
     ORDER BY id ASC
     """
@@ -85,6 +98,8 @@ def generate_report(df):
     report.append(f"- Risk score: {latest['risk_score']}")
     report.append(f"- Decision: {latest['decision']}")
     report.append(f"- Command: {latest['command']}")
+    if "llm_reason" in latest and latest["llm_reason"]:
+        report.append(f"- Mission reason: {latest['llm_reason']}")
     report.append("")
     report.append("## Object Counts")
     report.append("")
