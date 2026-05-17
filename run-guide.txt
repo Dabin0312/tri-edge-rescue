@@ -1,0 +1,276 @@
+Tri-Edge Rescue 구동 방법
+=========================
+
+프로젝트 주소
+-------------
+https://github.com/Dabin0312/tri-edge-rescue
+
+프로젝트 개요
+-------------
+Tri-Edge Rescue는 클라우드 서버 없이 동작하는 온디바이스 멀티로봇 탐색·구조 AI 프로젝트입니다.
+Gazebo 시뮬레이션에서 Robot A/B가 각자 위치와 위험 상황을 summary JSON으로 만들고,
+Commander C가 이를 받아 임무 명령을 생성한 뒤 다시 로봇에게 전달합니다.
+
+검증한 핵심 흐름은 다음과 같습니다.
+
+1. Robot A/B가 원본 영상이나 전체 센서 데이터를 보내지 않고 summary JSON만 전송
+2. Commander C가 summary를 기반으로 avoid_area, approach_victim 등의 명령 생성
+3. 판단 결과와 명령이 SQLite DB에 저장되고 Streamlit Dashboard에 표시됨
+
+
+1. 실행 환경
+------------
+전체 ROS2/Gazebo 구동은 Ubuntu 또는 Jetson 환경을 기준으로 합니다.
+
+필요 환경:
+- Ubuntu 22.04 권장
+- ROS2 Humble
+- Gazebo Classic
+- gazebo_ros 패키지
+- TurtleBot3 Gazebo 모델
+- Python 3.10 이상
+- colcon build tools
+
+ROS2 Humble 환경에서 필요한 주요 패키지 설치 예시는 다음과 같습니다.
+
+sudo apt update
+sudo apt install ros-humble-gazebo-ros-pkgs ros-humble-turtlebot3-gazebo python3-colcon-common-extensions
+
+
+2. 소스 코드 받기
+----------------
+터미널에서 다음 명령을 실행합니다.
+
+git clone https://github.com/Dabin0312/tri-edge-rescue.git
+cd tri-edge-rescue
+
+
+3. Python 의존성 설치
+---------------------
+Dashboard, report generator, Qwen smoke test 실행을 위해 Python 패키지를 설치합니다.
+
+python3 -m pip install -r requirements.txt
+
+참고:
+- torch와 transformers는 Qwen2.5-0.5B-Instruct 모델 실행에 필요합니다.
+- 모델이 없거나 메모리가 부족한 경우에도 deterministic fallback planner로 기본 동작은 가능합니다.
+
+
+4. 환경 변수 설정
+----------------
+일반적인 단일 PC/VM 실행에서는 아래 설정을 사용하면 됩니다.
+
+export TRI_EDGE_HOME=~/tri-edge-rescue
+export TRI_EDGE_DB_PATH=$TRI_EDGE_HOME/db/mission_events.db
+export TRI_EDGE_ENABLE_QWEN=auto
+
+Qwen 모델 다운로드나 로딩 없이 가볍게 테스트하려면 다음처럼 설정합니다.
+
+export TRI_EDGE_ENABLE_QWEN=0
+
+여러 장비 또는 Jetson 3대를 나누어 사용할 경우에는 모든 장비에서 같은 ROS_DOMAIN_ID를 사용합니다.
+
+export ROS_DOMAIN_ID=7
+
+
+5. ROS2 워크스페이스 빌드
+------------------------
+ROS2 패키지를 빌드합니다.
+
+cd ~/tri-edge-rescue/ros2_ws
+source /opt/ros/humble/setup.bash
+colcon build
+source install/setup.bash
+
+
+6. 전체 데모 실행 순서
+---------------------
+아래 순서대로 터미널을 4개 열고 실행합니다.
+
+
+[Terminal 1] Gazebo rescue world 실행
+
+cd ~/tri-edge-rescue
+./scripts/run_gazebo_world.sh
+
+역할:
+- rescue_lab.world 실행
+- 벽, 장애물, 피해자, 위험 구역, 안전 구역이 포함된 시뮬레이션 환경 생성
+
+
+[Terminal 2] Robot A/B 생성
+
+cd ~/tri-edge-rescue
+./scripts/spawn_robots.sh
+
+역할:
+- TurtleBot3 Burger 기반 Robot A/B를 Gazebo 환경에 spawn
+- /robot_a/odom, /robot_b/odom 토픽이 생성되는지 확인
+
+
+[Terminal 3] Robot brain 및 Commander C 실행
+
+cd ~/tri-edge-rescue/ros2_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch commander_c demo_system.launch.py
+
+역할:
+- Robot A Brain 실행
+- Robot B Brain 실행
+- Commander C 실행
+- Robot A/B event_summary 수신
+- 위험도와 객체 종류에 따라 task_command 생성
+- SQLite DB에 mission event 저장
+
+
+[Terminal 4] Dashboard 실행
+
+cd ~/tri-edge-rescue
+./scripts/run_dashboard.sh
+
+브라우저에서 아래 주소를 엽니다.
+
+http://localhost:8501
+
+Dashboard에서 확인할 수 있는 내용:
+- Latest Event ID
+- Loaded Events
+- High Risk Events
+- Victim Candidates
+- Recent Mission Events
+- Robot별 최신 command
+- LLM mission reason
+
+
+7. 주요 ROS2 토픽 확인
+---------------------
+다음 명령으로 토픽 목록을 확인합니다.
+
+source /opt/ros/humble/setup.bash
+ros2 topic list
+
+주요 토픽:
+- /robot_a/odom
+- /robot_b/odom
+- /robot_a/event_summary
+- /robot_b/event_summary
+- /robot_a/task_command
+- /robot_b/task_command
+
+
+8. 정상 동작 확인 방법
+---------------------
+정상적으로 실행되면 다음 흐름을 확인할 수 있습니다.
+
+1. Robot A/B Brain이 odom 정보를 받아 현재 위치를 갱신함
+2. 각 로봇이 object, position, risk_score가 포함된 summary JSON 발행
+3. Commander C가 summary를 수신하고 명령 생성
+4. 예시 명령:
+   - risk_score >= 7이면 avoid_area
+   - object == person이면 approach_victim
+   - object == obstacle이면 update_map_and_avoid
+   - 그 외에는 continue_exploration
+5. Commander C가 명령을 /robot_a/task_command 또는 /robot_b/task_command로 전송
+6. Dashboard에 DB 저장 결과와 최신 event가 표시됨
+
+
+9. Mission Report 생성
+----------------------
+시연 후 저장된 DB를 기반으로 report 파일을 생성할 수 있습니다.
+
+cd ~/tri-edge-rescue
+python3 dashboard/generate_report.py
+
+결과 파일:
+
+reports/mission_report.md
+
+
+10. Qwen Planner 단독 확인
+-------------------------
+Qwen 모델 없이 fallback planner만 빠르게 확인하려면 다음을 실행합니다.
+
+cd ~/tri-edge-rescue
+TRI_EDGE_ENABLE_QWEN=0 python3 qwen_test.py
+
+정상 예시:
+Robot A should avoid_area because a high-risk hazard was detected near (-3.50, -3.60).
+
+
+11. Jetson 3대 분산 실행 구성
+----------------------------
+최종 배치 개념은 다음과 같습니다.
+
+Gazebo PC / Ubuntu VM:
+- Gazebo world 실행
+- Robot A/B spawn
+- 명령:
+  ./scripts/run_gazebo_world.sh
+  ./scripts/spawn_robots.sh
+
+Jetson A:
+- Robot A Brain 실행
+- 명령:
+  ./scripts/run_robot_a.sh
+
+Jetson B:
+- Robot B Brain 실행
+- 명령:
+  ./scripts/run_robot_b.sh
+
+Jetson C:
+- Commander C, DB, Dashboard 실행
+- 명령:
+  ./scripts/run_commander.sh
+  ./scripts/run_dashboard.sh
+
+주의:
+- 모든 장비가 같은 네트워크에 있어야 합니다.
+- 모든 장비의 ROS_DOMAIN_ID가 같아야 합니다.
+- 방화벽이나 네트워크 격리로 ROS2 discovery가 막히면 토픽이 보이지 않을 수 있습니다.
+
+
+12. 문제 해결
+-------------
+1. Gazebo에서 로봇이 생성되지 않는 경우
+   - Terminal 1에서 Gazebo가 완전히 실행된 뒤 spawn_robots.sh를 실행합니다.
+   - ros2 service list 명령으로 /spawn_entity 서비스가 있는지 확인합니다.
+
+2. /robot_a/odom 또는 /robot_b/odom이 보이지 않는 경우
+   - TurtleBot3 Gazebo 모델 설치 여부를 확인합니다.
+   - export TURTLEBOT3_MODEL=burger 설정 여부를 확인합니다.
+
+3. Commander C가 Qwen 모델 로딩에서 오래 걸리는 경우
+   - 처음 실행 시 모델 다운로드 또는 로딩 시간이 걸릴 수 있습니다.
+   - 빠른 데모가 목적이면 export TRI_EDGE_ENABLE_QWEN=0 설정 후 실행합니다.
+
+4. Dashboard에 데이터가 나오지 않는 경우
+   - Commander C가 실행 중인지 확인합니다.
+   - db/mission_events.db 파일이 생성되었는지 확인합니다.
+   - TRI_EDGE_DB_PATH가 Dashboard와 Commander C에서 같은 경로인지 확인합니다.
+
+5. 여러 장비에서 ROS2 토픽이 보이지 않는 경우
+   - 모든 장비의 ROS_DOMAIN_ID가 같은지 확인합니다.
+   - 같은 LAN에 연결되어 있는지 확인합니다.
+   - ping으로 서로 통신 가능한지 확인합니다.
+
+
+13. 제출물 참고
+---------------
+제출 시 함께 포함하면 좋은 파일/폴더:
+
+- 최종 발표 PPT
+- 구동 시연 영상 또는 스크린샷
+- tri-edge-rescue 소스 코드 전체
+- 이 run-guide.txt 파일
+- 필요 시 reports/mission_report.md
+
+권장 압축 구조:
+
+Tri-Edge-Rescue-Final/
+  presentation/
+  demo_video_or_screenshots/
+  source_code/
+  run-guide.txt
+  mission_report.md
